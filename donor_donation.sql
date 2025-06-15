@@ -1,8 +1,6 @@
 --В этом кейсе вы будете работать с данными проекта DonorSearch. Цель проекта — мотивировать людей становиться донорами и делать регулярные донации. 
 	--Для этого важно понимать, какие факторы влияют на активность доноров и какими могут быть стратегии для их мотивации.
 
-
-
 -- 1) Определить регионы с наибольшим количеством зарегистрированных доноров
 SELECT region,
        COUNT(id) AS donor_count
@@ -19,7 +17,7 @@ region                               | donor_count
 Россия, Татарстан, Казань            | 6610
 Украина, Киевская область, Киев      | 3541
 
--- Выборка топ городов с наивысшим кол-вом доноров и донаций
+-- Выборка топ городов с наивысшим кол-вом доноров и донаций в клиниках
 
 SELECT 
 	city,
@@ -214,61 +212,53 @@ confirmed_donations|donations_before_registration|donatios_on_site|count_bonuses
 -------------------+-----------------------------+----------------+-------------------+
              222877|                       177491|           45386|              21108|
              
+
+-- Оценка, как система бонусов влияет на зарегистрированные в системе донации.
+WITH donor_activity AS
+  (SELECT u.id,
+          u.confirmed_donations,
+          COALESCE(b.user_bonus_count, 0) AS user_bonus_count
+   FROM donorsearch.user_anon_data u
+   LEFT JOIN donorsearch.user_anon_bonus b ON u.id = b.user_id)
+SELECT CASE
+           WHEN user_bonus_count > 0 THEN 'Получили бонусы'
+           ELSE 'Не получали бонусы'
+       END AS статус_бонусов,
+       COUNT(id) AS количество_доноров,
+       AVG(confirmed_donations) AS среднее_количество_донаций
+FROM donor_activity
+GROUP BY статус_бонусов;
+
+статус_бонусов     | количество_доноров | среднее_количество_донаций 
+-------------------|--------------------|----------------------------
+Получили бонусы    | 21108              | 13.90
+Не получали бонусы | 256491             | 0.53        
+             
+             
+
 -- Изучение пользователей по каналам и их метрики
 
-SELECT 
-	COUNT(id) AS ttl_users,
-	ROUND(AVG(confirmed_donations),2) AS avg_donations_per_users,
-	SUM(confirmed_donations) AS sum_donations,
-	'VK' AS source_peopl
+SELECT CASE
+           WHEN autho_vk THEN 'ВКонтакте'
+           WHEN autho_ok THEN 'Одноклассники'
+           WHEN autho_tg THEN 'Telegram'
+           WHEN autho_yandex THEN 'Яндекс'
+           WHEN autho_google THEN 'Google'
+           ELSE 'Без авторизации через соцсети'
+       END AS социальная_сеть,
+       COUNT(id) AS количество_доноров,
+       ROUND(AVG(confirmed_donations),2) AS среднее_количество_донаций
 FROM donorsearch.user_anon_data
-WHERE autho_vk = TRUE
-GROUP BY source_peopl
-UNION ALL
-SELECT 
-	COUNT(id) AS ttl_users,
-	ROUND(AVG(confirmed_donations),2) AS avg_donations_per_users,
-	SUM(confirmed_donations) AS sum_donations,
-	'OK' AS source_peopl
-FROM donorsearch.user_anon_data
-WHERE autho_ok = TRUE
-GROUP BY source_peopl
-UNION ALL
-SELECT 
-	COUNT(id) AS ttl_users,
-	ROUND(AVG(confirmed_donations),2) AS avg_donations_per_users,
-	SUM(confirmed_donations) AS sum_donations,
-	'TG' AS source_peopl
-FROM donorsearch.user_anon_data
-WHERE autho_tg = TRUE
-GROUP BY source_peopl
-UNION ALL
-SELECT 
-	COUNT(id) AS ttl_users,
-	ROUND(AVG(confirmed_donations),2) AS avg_donations_per_users,
-	SUM(confirmed_donations) AS sum_donations,
-	'YANDEX' AS source_peopl
-FROM donorsearch.user_anon_data
-WHERE autho_yandex = TRUE
-GROUP BY source_peopl
-UNION ALL
-SELECT 
-	COUNT(id) AS ttl_users,
-	ROUND(AVG(confirmed_donations),2) AS avg_donations_per_users,
-	SUM(confirmed_donations) AS sum_donations,
-	'GOOGLE' AS source_peopl
-FROM donorsearch.user_anon_data
-WHERE autho_google = TRUE
-GROUP BY source_peopl;
+GROUP BY социальная_сеть;
 
-ttl_users|avg_donations_per_users|sum_donations|source_peopl|
----------+-----------------------+-------------+------------+
-   127254|                   0.91|       116097|VK          |
-    16485|                   2.22|        36577|GOOGLE      |
-     7766|                   1.72|        13384|OK          |
-     5170|                   3.90|        20144|YANDEX      |
-      890|                   4.32|         3846|TG          |
-      
+социальная_сеть              |количество_доноров|среднее_количество_донаций|
+-----------------------------+------------------+--------------------------+
+Google                       |             14292|                      1.08|
+Telegram                     |               481|                      1.17|
+Без авторизации через соцсети|            113266|                      0.71|
+ВКонтакте                    |            127254|                      0.91|
+Одноклассники                |              6410|                      0.56|
+Яндекс                       |              4133|                      1.73|
       
 -- Сравнение активности однократных доноров с активностью повторных доноров
       
@@ -369,3 +359,92 @@ GROUP BY donation_type;
 |-------------|-----------------------|-------------------|---------------|
 |Безвозмездно |          22903        |        4950       |      21.61    |
 |Платно       |          3299         |        429        |      13.00    |
+
+-- Анализ мероприятий по длительности
+
+SELECT
+	CASE
+		WHEN EXTRACT(DAY FROM AGE(event_end::timestamp, event_begin::timestamp)) = 1
+			THEN '1 день'
+		WHEN EXTRACT(DAY FROM AGE(event_end::timestamp, event_begin::timestamp)) = 2
+			THEN '2 дня'
+		WHEN EXTRACT(DAY FROM AGE(event_end::timestamp, event_begin::timestamp)) = 3
+			THEN '3 дня'
+		WHEN EXTRACT(DAY FROM AGE(event_end::timestamp, event_begin::timestamp)) > 3
+			THEN 'Более 3-х дней'
+		ELSE 'Меньше дня'
+	END AS Длительность_мероприятия,
+	COUNT(id) AS Количество_мероприятий,
+	ROUND(AVG(reg_count),2) AS Среднее_регистраций,
+	MIN(reg_count) AS Минимум_регистраций,
+	MAX(reg_count) AS Максимум_регистраций
+FROM donorsearch.events
+GROUP BY Длительность_мероприятия
+ORDER BY Длительность_мероприятия
+
+Длительность_мероприятия|Количество_мероприятий|Среднее_регистраций|Минимум_регистраций|Максимум_регистраций|
+------------------------+----------------------+-------------------+-------------------+--------------------+
+1 день                  |                   111|               1.60|                  0|                  91|
+2 дня                   |                    38|               0.11|                  0|                   3|
+3 дня                   |                    23|               0.74|                  0|                   8|
+Более 3-х дней          |                    80|               0.54|                  0|                  21|
+Меньше дня              |                  1284|               2.27|                  0|                  99|
+
+-- Анализ топ мероприятий
+
+SELECT
+	city AS Город,
+	id AS Мероприятие,
+	EXTRACT(DAY FROM AGE(event_end::timestamp, event_begin::timestamp)) AS Длительность_дней,
+	reg_count AS Регистраций
+FROM donorsearch.events
+ORDER BY reg_count DESC, Длительность_дней DESC, city DESC
+LIMIT 10;
+
+Город                         |Мероприятие|Длительность_дней|Регистраций|
+------------------------------+-----------+-----------------+-----------+
+Россия, Татарстан, Альметьевск|       1676|                0|         99|
+Россия, Татарстан, Альметьевск|       1278|                0|         99|
+Россия, Татарстан, Казань     |       1594|                0|         98|
+Россия,  Москва               |       1624|                0|         95|
+Россия,  Москва               |       1561|                1|         91|
+Россия, Татарстан, Казань     |       1583|                0|         83|
+Россия, Татарстан, Казань     |       1184|                0|         74|
+Россия,  Москва               |       1623|                0|         71|
+Россия, Татарстан, Казань     |        586|                0|         67|
+Россия,  Москва               |        822|                0|         66|
+
+-- Анализ топ организаторов
+WITH gr AS(
+    SELECT
+        event_id,
+        COUNT(DISTINCT donor_id) AS unique_donors,
+        AVG(donation_count) AS avg_donations
+    FROM donorsearch.user_donation
+    GROUP BY event_id
+)
+SELECT
+    e.organization_id,
+    e.city,
+    COUNT(DISTINCT e.id) AS Мероприятий,
+    SUM(e.reg_count) AS Регистраций,
+    SUM(gr.unique_donors) AS Доноров,
+    AVG(gr.avg_donations) AS Среднее_донаций
+FROM donorsearch.events AS e
+JOIN gr ON e.id = gr.event_id
+GROUP BY e.organization_id, e.city
+ORDER BY Мероприятий DESC, Регистраций DESC
+LIMIT 10
+
+organization_id|city                               |Мероприятий|Регистраций|Доноров|Среднее_донаций        |
+---------------+-----------------------------------+-----------+-----------+-------+-----------------------+
+            558|Россия, Татарстан, Казань          |         28|        387|    387|     8.0914048576904810|
+              5|Россия, Татарстан, Казань          |         12|        517|    517| 4.84800097860842439167|
+            146|Россия, Татарстан, Набережные Челны|         10|        158|    158| 1.15752525252525253111|
+             36|Россия, Татарстан, Альметьевск     |          8|        438|    438| 1.57378989848505907633|
+            331|Россия, Татарстан, Набережные Челны|          6|        161|    161| 0.38420015770580725794|
+            557|Россия, Татарстан, Казань          |          6|         46|     46|    12.8558201058201058|
+             83|Россия, Карелия, Петрозаводск      |          6|         28|     28| 0.00000000000000000000|
+             25|Россия,  Москва                    |          5|        165|    165| 0.55304092459264873915|
+            537|Россия, Татарстан, Казань          |          5|         63|     63|12.77222222222222222000|
+            267|Россия, Татарстан, Нижнекамск      |          5|         48|     48| 1.71969696969696969333|
